@@ -22,6 +22,7 @@ from .models import (
     DuplicateTriggerError,
     HotString,
     HotStringError,
+    Suggestion,
     utcnow,
     validate_description,
     validate_trigger,
@@ -159,6 +160,89 @@ def enabled_triggers() -> list[str]:
             .order_by(func.lower(HotString.trigger), HotString.trigger)
         )
         return list(session.exec(statement).all())
+
+
+def migrate_triggers_to_semicolon() -> int:
+    """Add the mandatory ``;`` prefix to legacy triggers, once.
+
+    Rows that already start with ``;`` are untouched.  A row is skipped (and
+    logged) when adding the prefix would exceed the length limit or collide
+    with another trigger; it stays in the database so the user can edit it.
+    Skipped rows cannot fire, because the matcher only accepts ``;`` triggers.
+
+    :return: The number of triggers that were updated.
+    """
+
+    changed = 0
+    with session_scope() as session:
+        rows = list(session.exec(select(HotString)).all())
+        existing = {row.trigger for row in rows}
+        for row in rows:
+            if row.trigger.startswith(config.TRIGGER_PREFIX):
+                continue
+            candidate = config.TRIGGER_PREFIX + row.trigger
+            if len(candidate) > config.MAX_TRIGGER_LENGTH:
+                logger.warning(
+                    "Cannot migrate trigger %r: '%s' would be too long", row.trigger, candidate
+                )
+                continue
+            if candidate in existing:
+                logger.warning(
+                    "Cannot migrate trigger %r: '%s' already exists", row.trigger, candidate
+                )
+                continue
+            row.trigger = candidate
+            row.updated_at = utcnow()
+            existing.add(candidate)
+            changed += 1
+    if changed:
+        logger.info("Migrated %d legacy trigger(s) to the ';' prefix", changed)
+    return changed
+
+
+def suggest_hotstrings(prefix: str, limit: int | None = None) -> list[Suggestion]:
+    """Return enabled HotStrings that start with ``prefix``.
+
+    Exact-case matches come first, followed by case-insensitive matches so a
+    mistyped capital letter still finds the intended HotString.  Only enabled
+    entries are offered.
+    """
+
+    if not prefix.startswith(config.TRIGGER_PREFIX):
+        return []
+
+    max_results = config.SUGGESTION_LIMIT if limit is None else limit
+    if max_results <= 0:
+        return []
+
+    with session_scope() as session:
+        statement = select(HotString).where(HotString.enabled.is_(True))
+        rows = list(session.exec(statement).all())
+
+    def sort_key(row: HotString) -> tuple[str, str]:
+        return row.trigger.casefold(), row.trigger
+
+    exact = sorted(
+        (row for row in rows if row.trigger.startswith(prefix)), key=sort_key
+    )
+    fold = prefix.casefold()
+    loose = sorted(
+        (
+            row
+            for row in rows
+            if not row.trigger.startswith(prefix) and row.trigger.casefold().startswith(fold)
+        ),
+        key=sort_key,
+    )
+    chosen = (exact + loose)[:max_results]
+    return [
+        Suggestion(
+            trigger=row.trigger,
+            description=row.description,
+            command=row.command,
+        )
+        for row in chosen
+    ]
 
 
 def has_open_action() -> bool:
@@ -299,8 +383,10 @@ __all__ = [
     "init_engine",
     "is_first_run",
     "list_hotstrings",
+    "migrate_triggers_to_semicolon",
     "reset_engine",
     "session_scope",
     "set_enabled",
+    "suggest_hotstrings",
     "update_hotstring",
 ]

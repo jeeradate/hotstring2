@@ -6,13 +6,14 @@
 
 **Type less. Do more.**
 
-HotString is a Windows desktop utility that turns short, case-sensitive triggers into text, PowerShell scripts, or built-in application actions. Type a trigger in **any** application and HotString erases it, then performs the configured command.
+HotString is a Windows desktop utility that turns short, case-sensitive triggers into text, PowerShell scripts, or built-in application actions. Every trigger starts with **`;`**. Type a trigger in **any** application and HotString erases it, then performs the configured command.
 
 It runs quietly in the system tray, supports Thai and other Unicode text, and includes a native desktop management window built with NiceGUI and pywebview.
 
 - **Text expansion** — `;em` → `tmyname@example.com`
 - **PowerShell launcher** — `;np` → `sStart-Process notepad`
 - **App actions** — `;hs` → `aopen` (reopen HotString from anywhere)
+- **Prefix suggestions** — type `;e` to pop up a list of matching HotStrings, then press Enter to run one
 - **Native window + tray icon** — no browser tab, no always-visible window
 - **Local-first** — SQLite database under `%APPDATA%\HotString`, no account or cloud service
 
@@ -35,7 +36,7 @@ It runs quietly in the system tray, supports Thai and other Unicode text, and in
 ## Requirements
 
 - **Windows 10 or Windows 11** (the target platform; development imports may work elsewhere, but the keyboard hook and autostart are Windows-specific)
-- **Python 3.11 or newer**
+- **Python 3.11 or newer** with Tkinter (included in standard Windows Python builds; used by the suggestion popup)
 - **[uv](https://docs.astral.sh/uv/)** for installation and running
 - **Microsoft Edge WebView2 Runtime** for the native window (preinstalled on current Windows 10/11 systems; [download it here](https://developer.microsoft.com/microsoft-edge/webview2/) if needed)
 - **PowerShell** for `s` commands — HotString prefers **PowerShell 7+ (`pwsh`)** when available and falls back to **Windows PowerShell 5.1 (`powershell.exe`)**, which is included with Windows
@@ -78,6 +79,7 @@ The `aopen` entry is important: it is the emergency shortcut that brings the man
 ## Everyday use
 
 - Type a trigger in Notepad, a browser, Slack, Word, or any other app. HotString removes the trigger and runs the command.
+- Type just `;` followed by one non-space character to open the **suggestion popup**. Keep typing to filter, use `↑`/`↓` to change the highlighted row, then press `Enter` (or click a row) to run it.
 - **Close** the management window with the window's X button — HotString keeps running in the tray.
 - **Reopen** it from the tray icon, or by typing your `aopen` trigger (for example `;hs`).
 - **Start a second copy** (`uv run hotstring`) — it signals the running instance to show its window and then exits. Only one database owner runs at a time.
@@ -97,7 +99,7 @@ The `aopen` entry is important: it is the emergency shortcut that brings the man
 
 ## Command format
 
-Every command starts with a **one-character type prefix**. Separately, a trigger is **2–8 characters** with no whitespace.
+Every command starts with a **one-character type prefix**. Separately, a trigger is **2–8 characters total**, must begin with **`;`**, and has no whitespace.
 
 | Prefix | Type | Example | Result |
 | --- | --- | --- | --- |
@@ -175,13 +177,28 @@ Unknown actions are rejected when you save the HotString. If the database contai
 
 ### Trigger rules
 
-- **2–8 characters**, no spaces, tabs, or control characters.
-- **Case-sensitive**: `em` and `EM` are different triggers.
+- **Start with `;`** — this is the only allowed start marker. Typing `;` clears any pending text and starts a fresh trigger sequence; a second `;` inside a trigger is rejected.
+- **2–8 characters total** (the `;` counts as one), no spaces, tabs, or control characters.
+- **Case-sensitive**: `;em` and `;EM` are different triggers.
 - Matching uses the characters your active keyboard layout produces. A Thai layout produces Thai characters; a US layout produces US characters. Switch layouts or use characters available on the layout you type with.
-- Matching looks for the **longest** matching suffix when several triggers end at the same position.
-- Triggers that are suffixes of each other are allowed, but the UI warns you: typing `;em` fires `em` first if both are enabled, making `;em` effectively unreachable.
+- Matching looks for the **longest** matching suffix when several triggers end at the same position. Since every valid trigger starts with `;`, suffix conflicts are not possible between them.
 - Only enabled HotStrings are watched. Changes take effect immediately.
-- Trigger tip: use `;` as a prefix — almost no ordinary words start with a semicolon, which prevents accidental triggers.
+- Legacy rows without `;` are automatically given the prefix on startup. A row is skipped (and reported) if the new trigger would be too long or collide with an existing one; skipped rows stay in the table but never fire until you edit them.
+
+### Prefix suggestion popup
+
+As soon as you type `;` and **one more non-space character** (for example `;e`), HotString shows a small always-on-top popup with the enabled HotStrings whose triggers start with what you typed. It does **not** take keyboard focus, so you can keep typing in the same application.
+
+| Action | Result |
+| --- | --- |
+| Type more characters | Filters the list down to triggers with that prefix |
+| `↑` / `↓` | Moves the highlight |
+| `Enter` | Runs the highlighted HotString immediately |
+| Click a row | Runs that HotString immediately |
+| `Esc`, `space`, navigation keys, mouse click outside, focus change | Closes the popup and clears the pending trigger |
+| `Backspace` | Removes the last character and refreshes the list |
+
+When you choose a suggestion, HotString erases only the characters you actually typed (`;e`, for example), then runs the selected command — the same as typing the full trigger. Typing a complete trigger still fires that trigger directly, even if a different row is highlighted. Exact-case matches are listed first, followed by case-insensitive matches so `;E` still finds `;email`. The popup is capped at eight results and only offers enabled entries.
 
 ### What resets a pending trigger
 
@@ -192,7 +209,8 @@ The rolling 8-character buffer is cleared by:
 - Function keys `F1`–`F12`
 - Mouse clicks and scrolling
 - Switching the foreground window
-- Backspace removes the last buffered character
+- Backspace removes the last buffered character and refreshes the suggestion popup
+- Typing `;` starts a new pending trigger and clears earlier characters
 - Typing while `Ctrl`, `Alt`, or `Win` is held is ignored
 
 HotString also ignores keystrokes it injects itself, so expansion never re-triggers the listener.
@@ -210,7 +228,7 @@ The dashboard table lists every entry with its trigger, description, command, an
 - **Search** — the search box filters by trigger, description, or command.
 - **Long commands** — the editor keeps its **Save** and **Test** buttons pinned while the form scrolls. The command box stops growing at about a third of the window height and scrolls internally, and the **expand** button in the editor header widens the editor to nearly the full window.
 - **Test** — the editor's Test button previews `t` text instead of typing it, runs `s` scripts and shows their output, and validates `a` actions without performing them.
-- **Validation** — triggers must be unique, 2–8 characters, and contain no whitespace. The editor warns when a new trigger is a suffix of another trigger (or vice versa).
+- **Validation** — triggers must be unique, start with `;`, be 2–8 characters total, and contain no whitespace or extra semicolons. The editor warns about suffix conflicts (mostly relevant to legacy rows).
 
 Changes are written to SQLite and the live listener is updated in the same operation, so you do not need to restart HotString after editing.
 
@@ -265,6 +283,7 @@ hotstring/
 │   ├── models.py            # SQLModel table + validation
 │   ├── native_window.py     # pywebview close-to-hide hook
 │   ├── single_instance.py   # named mutex + show-UI event
+│   ├── suggestions.py       # always-on-top prefix suggestion popup (Tk thread)
 │   ├── tray.py              # pystray icon and menu
 │   └── ui.py                # NiceGUI dashboard, onboarding, dialogs
 ├── tests/
@@ -321,7 +340,7 @@ uv run hotstring --show --no-tray --no-hook
 uv run pytest
 ```
 
-The suite covers trigger validation, suffix-conflict warnings, database CRUD and first-run detection, rolling-buffer matching, command parsing, text delivery selection, PowerShell argument construction, action dispatch, and asynchronous error reporting. PowerShell and text injection are mocked; the tests never type into your desktop or run a real script.
+The suite covers trigger validation (including the mandatory `;` prefix), legacy-trigger migration, suggestion lookup, suffix-conflict warnings, database CRUD and first-run detection, rolling-buffer matching, prefix/suggestion flow in the listener, command parsing, text delivery selection, PowerShell argument construction, action dispatch, and asynchronous error reporting. PowerShell, the keyboard hook, and text injection are mocked; the tests never type into your desktop or run a real script.
 
 ---
 
@@ -330,10 +349,18 @@ The suite covers trigger validation, suffix-conflict warnings, database CRUD and
 **Nothing happens when I type a trigger**
 
 - Check whether listening is paused (header badge and tray menu).
+- The trigger must start with `;`; older entries are prefixed automatically at startup, but skipped ones must be edited manually.
 - Triggers are case-sensitive and depend on the active keyboard layout.
 - The window must have keyboard focus; HotString cannot see input directed at elevated ("Run as administrator") windows unless HotString itself is elevated.
 - Make sure the HotString is enabled and the trigger is not in a suffix conflict with a shorter trigger.
 - Check `%APPDATA%\HotString\hotstring.log` for hook errors.
+
+**The suggestion popup does not appear**
+
+- Type `;` followed by one non-space character; `;` alone does not open it.
+- Only enabled HotStrings starting with the typed prefix are shown. If none exist, nothing appears.
+- The popup appears near the mouse pointer, stays on top, and does not take focus. Press `Esc` or click elsewhere to dismiss it.
+- The popup needs Tkinter (included with standard Windows Python distributions). Check the log if it cannot be created.
 
 **The window does not appear**
 
@@ -371,6 +398,7 @@ HotString uses a named mutex per Windows session. A second launch signals the fi
 - **No undo history.** Deleting a HotString permanently removes it from the database.
 - **Synthetic input from other automation tools** can look like typing. HotString only suppresses its own injections; other tools may accidentally fire triggers.
 - **Password fields and secure input.** HotString cannot detect that a field is sensitive; triggers may fire there just like ordinary text.
+- **Suggestion popup needs Tkinter.** It uses the Tk runtime bundled with standard Windows Python builds and the global keyboard hook to receive navigation keys; custom Python builds without Tk will log an error and skip suggestions.
 - **No installer or code signing.** This project is distributed as source and runs through `uv`.
 - **Tray notifications are best-effort.** pystray support varies by Windows configuration and notification settings.
 - **Single desktop session.** The mutex and show-UI event are scoped to the current user session; Fast User Switching can run one instance per session.

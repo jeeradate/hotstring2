@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from . import autostart, config, db
 from .executor import CommandExecutor
 from .listener import KeyboardListener
+from .models import TriggerValidationError, validate_trigger
 from .native_window import configure as configure_native_window
 from .single_instance import SingleInstance
 from .ui import HotStringUI
@@ -154,6 +155,21 @@ class HotStringApp:
 
         self._single_instance.start_show_ui_waiter(self.show_window)
         db.init_engine()
+        db.migrate_triggers_to_semicolon()
+        invalid: list[str] = []
+        for row in db.list_hotstrings():
+            try:
+                validate_trigger(row.trigger)
+            except TriggerValidationError:
+                invalid.append(row.trigger)
+        if invalid:
+            message = (
+                "Some triggers cannot be used yet "
+                f"({', '.join(invalid)}). Edit them in the dashboard so they start with "
+                "';' and follow the 2–8 character rule."
+            )
+            logger.warning(message)
+            self._report_error(message)
         self._first_run = db.is_first_run()
         logger.info("Startup mode: %s", "first run" if self._first_run else "background")
 

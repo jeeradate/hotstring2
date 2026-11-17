@@ -212,8 +212,10 @@ class DashboardPage:
                                 )
 
                     ui.label(
-                        "A trigger is 2–8 characters with no spaces. After you set it up, type it in any "
-                        "application and HotString will erase it and run your command."
+                        "Every trigger starts with ';' and is 2–8 characters total with no spaces. "
+                        "After you set it up, type it in any application and HotString will erase it "
+                        "and run your command. Typing ';' plus one letter also opens a popup with "
+                        "matching HotStrings; press Enter to run the highlighted one."
                     ).classes("text-sm text-slate-600")
 
                     with ui.row().classes("w-full gap-3 items-start"):
@@ -328,7 +330,8 @@ class DashboardPage:
                                 "text-blue-700 text-xs"
                             )
                         ui.label(
-                            "Type a trigger anywhere. Case matters and the active keyboard layout decides the characters."
+                            "Type a ;trigger anywhere. Case matters, and typing ; plus one letter opens "
+                            "a popup of matching HotStrings."
                         ).classes("text-sm text-slate-500")
                     with ui.row().classes("items-center gap-2"):
                         self.search = (
@@ -395,8 +398,9 @@ class DashboardPage:
                     """
                     <q-td :props="props">
                       <q-chip dense square
-                              :color="props.row.enabled ? 'primary' : 'grey-5'"
+                              :color="props.row.invalid ? 'orange-6' : (props.row.enabled ? 'primary' : 'grey-5')"
                               text-color="white"
+                              :icon="props.row.invalid ? 'warning' : undefined"
                               class="hs-mono text-xs">
                         {{ props.row.trigger }}
                       </q-chip>
@@ -468,6 +472,11 @@ class DashboardPage:
             haystack = f"{item.trigger}\n{item.description}\n{item.command}".lower()
             if search_text and search_text not in haystack:
                 continue
+            try:
+                validate_trigger(item.trigger)
+                valid_trigger = True
+            except TriggerValidationError:
+                valid_trigger = False
             rows.append(
                 {
                     "id": item.id,
@@ -475,6 +484,7 @@ class DashboardPage:
                     "description": item.description,
                     "command": item.command,
                     "enabled": item.enabled,
+                    "invalid": not valid_trigger,
                     "updated": format_timestamp(item.updated_at),
                 }
             )
@@ -551,11 +561,19 @@ class DashboardPage:
                 "hs-editor-body w-full p-6 gap-4 overflow-y-auto min-h-0"
             ):
                 with ui.row().classes("w-full gap-3 items-start"):
-                    trigger_input = (
-                        ui.input("Trigger", value=hotstring.trigger if hotstring else "")
-                        .props("outlined dense maxlength=8")
-                        .classes("w-40")
-                    )
+                    with ui.column().classes("gap-0"):
+                        trigger_input = (
+                            ui.input(
+                                "Trigger",
+                                value=hotstring.trigger if hotstring else "",
+                                placeholder=";em",
+                            )
+                            .props("outlined dense maxlength=8")
+                            .classes("w-40")
+                        )
+                        ui.label("Start with ';'. Type ';x' to see suggestions.").classes(
+                            "text-[11px] text-slate-500"
+                        )
                     description_input = (
                         ui.input(
                             "Description",

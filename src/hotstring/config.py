@@ -17,9 +17,16 @@ APP_NAME = "HotString"
 APP_SLUG = "hotstring"
 VERSION = "0.1.0"
 
+#: Every trigger starts with this character.  Typing it begins a fresh
+#: trigger sequence and enables the suggestion popup after the next character.
+TRIGGER_PREFIX = ";"
+
 MIN_TRIGGER_LENGTH = 2
 MAX_TRIGGER_LENGTH = 8
 BUFFER_LENGTH = 8
+
+#: Maximum number of HotStrings shown in the suggestion popup.
+SUGGESTION_LIMIT = 8
 
 #: How long (seconds) to ignore keyboard events after synthetic input.
 INJECTION_GUARD_SECONDS = 0.35

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlmodel import Field, SQLModel
 
-from .config import MAX_TRIGGER_LENGTH, MIN_TRIGGER_LENGTH
+from .config import MAX_TRIGGER_LENGTH, MIN_TRIGGER_LENGTH, TRIGGER_PREFIX
 
 
 class HotStringError(Exception):
@@ -31,9 +32,10 @@ def utcnow() -> datetime:
 def validate_trigger(trigger: str) -> str:
     """Validate a trigger and return it unchanged.
 
-    Triggers are 2-8 visible characters and may contain letters, digits and
-    symbols.  Whitespace is not allowed because it makes matching ambiguous.
-    Matching is case-sensitive.
+    Triggers are 2-8 visible characters and must start with ``;``.  Typing the
+    prefix starts a fresh trigger sequence; a semicolon inside the trigger is
+    not allowed.  Whitespace is not allowed because it makes matching
+    ambiguous.  Matching is case-sensitive.
 
     :raises TriggerValidationError: if the trigger is invalid.
     """
@@ -42,6 +44,14 @@ def validate_trigger(trigger: str) -> str:
         raise TriggerValidationError("Trigger must be text.")
     if not trigger:
         raise TriggerValidationError("Trigger is required.")
+    if not trigger.startswith(TRIGGER_PREFIX):
+        raise TriggerValidationError(
+            f"Trigger must start with '{TRIGGER_PREFIX}', for example '{TRIGGER_PREFIX}em'."
+        )
+    if TRIGGER_PREFIX in trigger[len(TRIGGER_PREFIX):]:
+        raise TriggerValidationError(
+            f"'{TRIGGER_PREFIX}' is only allowed at the start of a trigger."
+        )
     if any(character.isspace() for character in trigger):
         raise TriggerValidationError("Trigger cannot contain spaces or tabs.")
     if not MIN_TRIGGER_LENGTH <= len(trigger) <= MAX_TRIGGER_LENGTH:
@@ -64,13 +74,24 @@ def validate_description(description: str) -> str:
     return description
 
 
+@dataclass(frozen=True)
+class Suggestion:
+    """One enabled HotString offered by the prefix suggestion popup."""
+
+    trigger: str
+    description: str
+    command: str
+
+
 def suffix_conflicts(trigger: str, other_triggers: Iterable[str]) -> list[str]:
     """Return triggers that have a suffix relationship with ``trigger``.
 
     Two triggers conflict when one is a suffix of the other.  With the shorter
-    trigger ``em`` and the longer trigger ``;em``, typing ``;em`` fires ``em``
+    trigger ``ab`` and the longer trigger ``xab``, typing ``xab`` fires ``ab``
     as soon as its last two characters have been typed.  The UI warns about
-    this because the longer trigger would effectively be unreachable.
+    this because the longer trigger would effectively be unreachable.  Valid
+    ``;``-prefixed triggers cannot conflict with each other, but legacy rows
+    can still be checked.
 
     :param trigger: The trigger being created or edited.
     :param other_triggers: All other triggers currently in the database.
