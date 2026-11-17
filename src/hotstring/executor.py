@@ -5,7 +5,9 @@ A command is plain text whose first character selects its type:
 ``t<text>``
     Type ``<text>`` into the foreground application.
 ``s<script>``
-    Run ``<script>`` with Windows PowerShell (hidden, non-blocking).
+    Run ``<script>`` with PowerShell (hidden, non-blocking).  HotString
+    prefers PowerShell 7+ (``pwsh``) when available and falls back to
+    Windows PowerShell (``powershell.exe``).
 ``a<action>``
     Run an internal HotString action (for example ``aopen``).
 
@@ -19,6 +21,7 @@ import ctypes
 import locale
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -34,6 +37,9 @@ from .models import HotStringError
 logger = logging.getLogger(__name__)
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+_powershell_executable: str | None = None
+_powershell_display_name: str | None = None
 
 #: Internal actions that may follow the ``a`` prefix.
 INTERNAL_ACTIONS = {
@@ -178,11 +184,50 @@ def choose_text_strategy(text: str) -> TextStrategy:
     return "type"
 
 
+def _detect_powershell() -> tuple[str, str]:
+    """Return the preferred PowerShell executable and a UI-friendly name.
+
+    PowerShell 7+ (``pwsh``) is preferred when it is on PATH.  Windows
+    PowerShell (``powershell.exe``) is used as the fallback because it ships
+    with Windows.
+    """
+
+    for candidate in ("pwsh.exe", "pwsh"):
+        path = shutil.which(candidate)
+        if path:
+            return path, f"PowerShell 7+ (pwsh) — {path}"
+    for candidate in ("powershell.exe", "powershell"):
+        path = shutil.which(candidate)
+        if path:
+            return path, f"Windows PowerShell — {path}"
+    return "powershell.exe", "Windows PowerShell (powershell.exe)"
+
+
+def get_powershell_executable() -> str:
+    """Return the executable used for ``s`` commands."""
+
+    global _powershell_executable, _powershell_display_name
+    if _powershell_executable is None:
+        _powershell_executable, _powershell_display_name = _detect_powershell()
+        logger.info("Using PowerShell executable: %s", _powershell_display_name)
+    return _powershell_executable
+
+
+def get_powershell_display_name() -> str:
+    """Return a human-readable description of the PowerShell in use."""
+
+    global _powershell_executable, _powershell_display_name
+    if _powershell_display_name is None:
+        _powershell_executable, _powershell_display_name = _detect_powershell()
+        logger.info("Using PowerShell executable: %s", _powershell_display_name)
+    return _powershell_display_name
+
+
 def build_powershell_arguments(script: str) -> list[str]:
     """Build the exact argument list used to run a PowerShell command."""
 
     return [
-        "powershell.exe",
+        get_powershell_executable(),
         "-NoProfile",
         "-WindowStyle",
         "Hidden",
@@ -571,6 +616,8 @@ __all__ = [
     "choose_text_strategy",
     "describe_command",
     "format_result",
+    "get_powershell_display_name",
+    "get_powershell_executable",
     "parse_command",
     "run_powershell",
     "text_preview",

@@ -7,7 +7,6 @@ from .app import run
 
 def main() -> None:
     """Run HotString and exit with its status code."""
-
     raise SystemExit(run())
 
 

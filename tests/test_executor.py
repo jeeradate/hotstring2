@@ -92,7 +92,8 @@ def test_text_preview_truncates() -> None:
     assert "3 more characters" in preview
 
 
-def test_build_powershell_arguments_exact_flags() -> None:
+def test_build_powershell_arguments_exact_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(executor, "get_powershell_executable", lambda: "powershell.exe")
     assert build_powershell_arguments("Get-Date") == [
         "powershell.exe",
         "-NoProfile",

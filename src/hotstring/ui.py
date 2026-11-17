@@ -20,6 +20,7 @@ from . import config, db
 from .executor import (
     CommandError,
     CommandType,
+    get_powershell_display_name,
     parse_command,
     validate_command,
 )
@@ -52,6 +53,23 @@ CUSTOM_CSS = """
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  /* Editor dialog: the body scrolls, the header and action bar stay visible. */
+  .hs-editor-card {
+    max-height: 92vh;
+  }
+  .hs-editor-card.hs-editor-expanded {
+    width: min(1100px, 95vw);
+    max-height: 96vh;
+  }
+  .hs-editor-body {
+    overflow-y: auto;
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
+  .hs-editor-command textarea {
+    max-height: 34vh;
+    overflow-y: auto;
   }
 </style>
 """
@@ -503,12 +521,35 @@ class DashboardPage:
         title = "Edit HotString" if editing else "New HotString"
 
         with ui.dialog() as dialog, ui.card().classes(
-            "w-[640px] max-w-[95vw] p-0 overflow-hidden shadow-xl"
-        ):
-            with ui.row().classes("w-full px-6 py-4 bg-slate-900 text-white items-center gap-2"):
+            "hs-editor-card w-[640px] max-w-[95vw] p-0 overflow-hidden shadow-xl flex flex-col"
+        ) as card:
+            expanded = False
+
+            def toggle_expand() -> None:
+                nonlocal expanded
+                expanded = not expanded
+                card.classes(toggle="hs-editor-expanded")
+                expand_button.props(
+                    f"icon={'close_fullscreen' if expanded else 'open_in_full'}"
+                )
+
+            with ui.row().classes(
+                "w-full px-6 py-4 bg-slate-900 text-white items-center gap-2 shrink-0"
+            ):
                 ui.icon("edit" if editing else "add").classes("text-blue-300")
                 ui.label(title).classes("text-lg font-semibold")
-            with ui.column().classes("w-full p-6 gap-4"):
+                ui.space()
+                expand_button = (
+                    ui.button(icon="open_in_full", on_click=toggle_expand)
+                    .props("flat round dense color=white")
+                    .tooltip("Expand or restore the editor")
+                )
+
+            # Only this body scrolls.  The header and action bar stay in view,
+            # so a long command can never push Save below the window edge.
+            with ui.column().classes(
+                "hs-editor-body w-full p-6 gap-4 overflow-y-auto min-h-0"
+            ):
                 with ui.row().classes("w-full gap-3 items-start"):
                     trigger_input = (
                         ui.input("Trigger", value=hotstring.trigger if hotstring else "")
@@ -529,13 +570,11 @@ class DashboardPage:
                         value=hotstring.command if editing else "t",
                     )
                     .props("outlined autogrow input-class=hs-mono")
-                    .classes("w-full hs-mono")
+                    .classes("w-full hs-mono hs-editor-command")
                 )
                 command_hint = ui.label("").classes("text-xs text-slate-500")
                 suffix_warning = ui.label("").classes("text-xs text-amber-700 bg-amber-50 rounded p-2")
                 suffix_warning.set_visibility(False)
-                error_label = ui.label("").classes("text-sm text-red-600")
-                error_label.set_visibility(False)
 
                 with ui.row().classes("w-full items-center justify-between"):
                     enabled_switch = ui.switch(
@@ -550,6 +589,14 @@ class DashboardPage:
                     "border border-slate-200 rounded p-3"
                 )
                 test_output.set_visibility(False)
+
+                def reveal_test_output() -> None:
+                    """Scroll the editor body so the test result stays visible."""
+
+                    ui.run_javascript(
+                        f"getHtmlElement({test_output.id})?.scrollIntoView("
+                        "{block: 'nearest', behavior: 'smooth'})"
+                    )
 
                 def update_hints() -> None:
                     raw_trigger = (trigger_input.value or "").strip()
@@ -604,15 +651,18 @@ class DashboardPage:
                         "Running PowerShell…" if parsed.type is CommandType.POWERSHELL else "Preparing preview…"
                     )
                     test_output.set_visibility(True)
+                    reveal_test_output()
                     try:
                         if parsed.type is CommandType.POWERSHELL:
                             result = await run.io_bound(self.app.test_command, command_input.value or "")
                         else:
                             result = self.app.test_command(command_input.value or "")
                         test_output.set_text(result)
+                        reveal_test_output()
                     except Exception as error:
                         logger.exception("Command test failed")
                         test_output.set_text(f"Test failed: {error}")
+                        reveal_test_output()
 
                 def save() -> None:
                     clear_error()
@@ -667,7 +717,14 @@ class DashboardPage:
                     ui.notify(message, type="positive")
                     self.refresh_all()
 
-                with ui.row().classes("w-full items-center justify-between gap-2 pt-1"):
+            # The action bar lives outside the scrolling body, so Save is
+            # always reachable no matter how long the command is.
+            with ui.column().classes(
+                "w-full px-6 py-4 gap-2 border-t border-slate-200 bg-white shrink-0"
+            ):
+                error_label = ui.label("").classes("text-sm text-red-600")
+                error_label.set_visibility(False)
+                with ui.row().classes("w-full items-center justify-between gap-2 flex-wrap"):
                     with ui.row().classes("gap-2"):
                         ui.button("Test", icon="play_arrow", on_click=test_command).props(
                             "outline color=primary"
@@ -678,6 +735,8 @@ class DashboardPage:
                     )
 
         dialog.open()
+        if not editing:
+            ui.timer(0.05, lambda: trigger_input.run_method("focus"), once=True)
 
     @staticmethod
     def _command_type_label(command_type: CommandType) -> str:
@@ -688,14 +747,16 @@ class DashboardPage:
         }[command_type]
 
     def confirm_delete(self, row: dict[str, Any]) -> None:
-        with ui.dialog() as dialog, ui.card().classes("w-[460px] max-w-[95vw] p-6 gap-4"):
+        with ui.dialog() as dialog, ui.card().classes(
+            "w-[460px] max-w-[95vw] max-h-[90vh] overflow-y-auto p-6 gap-4"
+        ):
             with ui.row().classes("items-center gap-3"):
                 ui.icon("delete_forever", size="2rem").classes("text-red-500")
                 with ui.column().classes("gap-0"):
                     ui.label("Delete this HotString?").classes("text-lg font-semibold")
                     ui.label(
                         f"{row.get('trigger')} — {row.get('description') or 'no description'}"
-                    ).classes("text-sm text-slate-500")
+                    ).classes("text-sm text-slate-500 break-words")
             ui.label("This cannot be undone.").classes("text-sm text-slate-600")
             with ui.row().classes("w-full justify-end gap-2"):
                 ui.button("Cancel", on_click=dialog.close).props("flat")
@@ -747,6 +808,16 @@ class DashboardPage:
                         on_change=self._on_pause_change,
                     )
                 ui.separator()
+                with ui.row().classes("w-full items-center justify-between gap-4"):
+                    with ui.column().classes("gap-0 flex-1"):
+                        ui.label("PowerShell for scripts").classes("font-medium text-slate-800")
+                        ui.label(
+                            "Used by s commands. HotString prefers PowerShell 7+ (pwsh) when available."
+                        ).classes("text-sm text-slate-500")
+                    ui.label(get_powershell_display_name()).classes(
+                        "text-xs text-slate-700 bg-slate-100 border border-slate-200 rounded px-3 py-2 hs-mono"
+                    )
+                ui.separator()
                 with ui.row().classes("w-full items-center justify-between gap-3 flex-wrap"):
                     with ui.column().classes("gap-0"):
                         ui.label("Data and logs").classes("font-medium text-slate-800")
@@ -764,7 +835,7 @@ class DashboardPage:
                             on_click=self._confirm_quit,
                         ).props("outline color=negative")
                 ui.label(
-                    "Security note: s commands run Windows PowerShell with your user permissions. "
+                    "Security note: s commands run PowerShell with your user permissions. "
                     "Only use scripts you understand."
                 ).classes("text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3")
 

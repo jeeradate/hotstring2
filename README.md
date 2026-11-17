@@ -38,15 +38,15 @@ It runs quietly in the system tray, supports Thai and other Unicode text, and in
 - **Python 3.11 or newer**
 - **[uv](https://docs.astral.sh/uv/)** for installation and running
 - **Microsoft Edge WebView2 Runtime** for the native window (preinstalled on current Windows 10/11 systems; [download it here](https://developer.microsoft.com/microsoft-edge/webview2/) if needed)
-- **Windows PowerShell 5.1** for `s` commands (included with Windows)
+- **PowerShell** for `s` commands — HotString prefers **PowerShell 7+ (`pwsh`)** when available and falls back to **Windows PowerShell 5.1 (`powershell.exe`)**, which is included with Windows
 
 ---
 
 ## Install from source
 
 ```powershell
-git clone https://github.com/jeeradate/hotstring.git
-cd hotstring
+git clone https://github.com/jeeradate/hotstring2.git
+cd hotstring2
 uv sync
 uv run hotstring
 ```
@@ -105,6 +105,8 @@ Every command starts with a **one-character type prefix**. Separately, a trigger
 | `s` | PowerShell | `sStart-Process notepad` | Runs the script with Windows PowerShell |
 | `a` | App action | `aopen` | Opens the HotString window |
 
+Because HotString can execute PowerShell commands, it can automate Windows tasks endlessly. You can look up PowerShell commands for various tasks using AI chats like Gemini, ChatGPT, etc., and copy them to test in the command field.
+
 One optional separator directly after the prefix is ignored. These are equivalent:
 
 ```text
@@ -148,10 +150,14 @@ sStart-Process "https://github.com"
 Scripts run in a background thread with:
 
 ```text
-powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command <script>
+<powershell> -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command <script>
 ```
 
+`<powershell>` is `pwsh` (PowerShell 7+) when it is found on `PATH`, otherwise `powershell.exe` (Windows PowerShell). The exact executable in use is shown in the app's **Settings**.
+
 No console window is shown. Standard output, standard error, and the exit code are written to the log. Non-zero exit codes and startup failures produce a notification.
+
+Since HotString can run PowerShell scripts, the possibilities for automating Windows are endless. Just ask an AI like Gemini or ChatGPT for a PowerShell command to handle any task, copy it, and test it right inside HotString!
 
 > **Security warning:** `s` commands are arbitrary PowerShell scripts that run with **your user permissions**. There is no sandbox. `-ExecutionPolicy Bypass` is used so scripts work without changing machine policy. Only add scripts you wrote or fully understand, and review any shared database before running it.
 
@@ -175,12 +181,13 @@ Unknown actions are rejected when you save the HotString. If the database contai
 - Matching looks for the **longest** matching suffix when several triggers end at the same position.
 - Triggers that are suffixes of each other are allowed, but the UI warns you: typing `;em` fires `em` first if both are enabled, making `;em` effectively unreachable.
 - Only enabled HotStrings are watched. Changes take effect immediately.
+- Trigger tip: use `;` as a prefix — almost no ordinary words start with a semicolon, which prevents accidental triggers.
 
 ### What resets a pending trigger
 
 The rolling 8-character buffer is cleared by:
 
-- `Enter`, `Esc`, `Tab`
+- `Enter`, `Esc`, `Tab`, `space`
 - Arrow keys, `Home`, `End`, `Page Up`, `Page Down`, `Delete`, `Insert`
 - Function keys `F1`–`F12`
 - Mouse clicks and scrolling
@@ -201,6 +208,7 @@ The dashboard table lists every entry with its trigger, description, command, an
 - **Enable / disable** — the table toggle takes effect immediately; disabled entries stay in the database but are not watched.
 - **Delete** — the trash button asks for confirmation first.
 - **Search** — the search box filters by trigger, description, or command.
+- **Long commands** — the editor keeps its **Save** and **Test** buttons pinned while the form scrolls. The command box stops growing at about a third of the window height and scrolls internally, and the **expand** button in the editor header widens the editor to nearly the full window.
 - **Test** — the editor's Test button previews `t` text instead of typing it, runs `s` scripts and shows their output, and validates `a` actions without performing them.
 - **Validation** — triggers must be unique, 2–8 characters, and contain no whitespace. The editor warns when a new trigger is a suffix of another trigger (or vice versa).
 
@@ -335,9 +343,9 @@ The suite covers trigger validation, suffix-conflict warnings, database CRUD and
 
 **`s` commands fail**
 
-- Confirm `powershell.exe` is available and the script works when run manually.
+- Confirm the PowerShell executable shown in **Settings** is available and the script works when run manually in that shell.
 - Read the log for stdout, stderr, and the exit code.
-- Some cmdlets behave differently in Windows PowerShell 5.1 than in PowerShell 7. HotString intentionally uses `powershell.exe`, not `pwsh.exe`.
+- Some cmdlets and behaviors differ between Windows PowerShell 5.1 and PowerShell 7+. If a script requires a specific version, install that version and verify which one HotString selected in **Settings**.
 
 **The clipboard is briefly overwritten**
 
